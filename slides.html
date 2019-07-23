@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Nix Workshop</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Nix Workshop
+
+---
+
+# Agenda
+
+* Learn About Nix
+* Learn Basic Tooling
+* Learn Basic Principles
+* Learn Nix Expression Language Basics
+* Implement Our Own Declarative Environment
+* Create Our Own Package
+
+---
+
+# Nix: The Big Picture
+
+### So what is Nix?
+
+- A _package manager_
+- A _purely functional programming language_
+- A _build tool_
+
+![wat](https://media.giphy.com/media/kaq6GnxDlJaBq/giphy.gif)
+
+---
+
+# Nix: The Big Picture
+
+### So someone wrote another package manager ...
+
+![wat](https://media.giphy.com/media/8PBfNDoySmsRc49P4F/giphy.gif)
+
+---
+
+# Nix: The Big Picture
+
+### Nix has some nice qualities
+
+- deterministic & reproducible
+- stateless & declarative
+- actually hard to really screw things up
+
+---
+# Nix: The Big Picture
+
+### Nix has some NOT SO nice qualities
+
+- steep learning curve
+- lack of documentation
+- cli tools UX needs work
+- sometimes collides with the "impure" rest of the world
+
+---
+# Nix: The Big Picture
+
+### The nix package manager
+
+- We can (un-)install software (_obviously_..)
+- Software can be installed per user (_user profile_)
+- nixpkgs is the official collection of nix packages
+
+---
+
+# Nix: The Big Picture
+
+### Do you have Nix installed ?
+
+```shell
+$ nix-env --version
+nix-env (Nix) 2.2.2
+```
+
+### Not installed?
+
+```shell
+$ curl https://nixos.org/nix/install | sh
+$ source ~/.nix-profile/etc/profile.d/nix.sh
+$ nix-env --version
+```
+
+---
+
+# Nix: The Big Picture
+
+### Intermission: Nix versions
+
+- **0.x**: `nix-env`, `nix-instantiate`, `nix-shell`, ...
+- **2.x**: `nix <cmd>`
+
+Nix 2.x introduced a revamp of the nix cli tools. Tools from both versions
+are still being used. This is a bit messy :(
+
+---
+
+# Nix: The Big Picture
+
+### Using `nix-env`
+
+- most frequently used tool
+- badly named
+- use it to query, install, uninstall packages
+
+💥 **Hands-On**
+```
+$ nix-env -q                     # what does this show?
+$ nix-env -qa                    # what about this command?
+$ nix-env -i hello && nix-env -q # makes sense?
+$ which hello                    # where is hello (hint: symlinks!)
+$ nix-env -e hello               # goodbye hello
+```
+
+---
+
+# Nix: The Big Picture
+
+### The Nix Store
+
+```shell
+$ which hello
+/home/gilligan/.nix-profile/bin/hello
+
+$ readlink -f $(which hello)
+/nix/store/83vqfmpq19g0rkgjf0sa319x919p0vvg-hello-2.10/bin/hello
+```
+
+- **Everything** always ends up in the Nix store
+- This conflicts with FHS
+- This brings plenty of benefits
+
+💥 **Hands-On**
+- Benefits? Why is having everything in /nix/store any good?
+- Remove `hello` and then check if path is gone from the store
+
+---
+
+# Nix: The Big Picture
+
+### Where Things Actually Go
+
+```shell
+$ which hello
+~/.nix-profile/bin/hello
+
+$ ls -l ~/.nix-profile
+~/.nix-profile -> /nix/var/nix/profiles/per-user/gilligan/profile
+
+$ ls -l /nix/var/nix/profiles/per-user/gilligan/profile
+/nix/var/nix/profiles/per-user/gilligan/profile-119-link
+```
+
+💥 **Hands-On**
+- (Un-)Installing software is just symlinking. How so?
+- How to *really* remove software? How to really delete the files?
+- Try `nix-env --list-generation` and `nix-env --switch-generation`
+
+---
+# Nix: The Big Picture
+
+### Where Things Are Coming From
+
+```shell
+$ nix-channel --list
+nixpkgs https://nixos.org/channels/nixpkgs-unstable
+
+$ nix-channel --update
+unpacking channels...
+created 2 symlinks in your user environment
+```
+**The nix channels**
+* You can subscribe to different **channels**
+* `nixpkgs-unstable`, `nixos-19.03`, `nixos-18.09`, ...
+* They provide _metadata_ on all available packages
+* The channels do _not_ contain actual binaries
+---
+# Nix: The Big Picture
+
+### Where Things Are Coming From (2)
+
+**Q: So where does all that package "metadata" in the channels come from?**
+
+**A: From https://github.com/NixOS/nixpkgs**
+
+All channels are just different commits on different branches of this repository. We will look at this repository more closely later on.
+
+---
+# Nix: The Big Picture
+
+### And now ... 
+
+![](https://media.giphy.com/media/116seTvbXx07F6/giphy.gif)
+
+---
+# Nix: The Big Picture
+
+### nix-shell
+
+* May not seem like much but nix-shell is a powerful tool
+* You can use it to create project specific environments
+* You can also use it to just quickly test something without installing it
+
+
+💥 **Hands-On**
+* `nix-shell -p cowsay`
+* `nix-shell --pure -p cowsay` -- **what is different?**
+* What could a **pure** shell be good for?
+---
+
+# Nix: The Big Picture
+
+### nix-shell: can we make it declarative?
+
+Ad-hoc use of `nix-shell` is nice but we also want to be able to make it
+reproducible:
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.mkShell {
+
+  buildInputs = [ pkgs.cowsay ];
+
+  shellHook = ''
+    echo "Welcome in the cowsay shell"
+  '';
+}
+```
+
+💥 **Hands-On**
+* Add the above to a file called `shell.nix`
+* Run `nix-shell`
+---
+
+# Nix: The Big Picture
+### We have written and used our first Nix expression
+
+![](https://media.giphy.com/media/1PMVNNKVIL8Ig/giphy.gif)
+
+_(now we just need to figure out what all of it means..)_
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+```
+* We are looking at the head of a function declaration
+* The function takes 1 argument, an _attribute set_
+* The attribute key has 1 _key_: `pkgs`
+* The key `pkgs` has a _default value_
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+```
+```Nix
+import <nixpkgs> {}
+```
+```Nix
+<nixpkgs>
+```
+
+* `nixpkgs` is just a (global) variable
+* Look at the output `echo $NIX_PATH`
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+```
+```Nix
+import <nixpkgs> {}
+```
+
+* `import` allows us to import other nix files
+* The **nixpkgs** variable points to a path which we are importing
+* The extra `{}` are there because we are importing a function
+* The function is executed and we get back a set
+* If you look at the **nixpkgs** path it is a checkout of `NixOS/nixpkgs`!
+---
+### Decomposing the file line by line
+
+#### Putting it together again ...
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+```
+
+* Function with one argument `pkgs`
+* If `pkgs` is not given we import **nixpkgs**
+* **nixpkgs** is the version of nixpkgs on your system
+
+💥 **Hands-On**
+* Can you spot any problems or downside with this approach?
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+```Nix
+pkgs.mkShell { ... }
+```
+* `pkgs` is bound to the result of importing `nixpkgs`
+* `pkgs` is itself a set with attributes and functions
+* `mkShell` is a function that we can call
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+```Nix
+{
+  buildInputs = [ pkgs.hello ];
+  ...
+}
+```
+* We are creating an attribute set
+* `buildInputs` is a key
+* `[ pkgs.hello ]` is a value (a single element list)
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+
+```Nix
+shellHook = ''
+  echo "Welcome!"
+'';
+```
+
+* `shellHook` is another attribute in our attribute set
+* Nix lets us use `''` to create multi-line strings
+
+---
+# Nix: The Big Picture
+
+### Decomposing the file line by line
+
+#### Putting it all back together again
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.mkShell {
+
+  buildInputs = [ pkgs.cowsay ];
+
+  shellHook = ''
+    echo "Welcome in the cowsay shell"
+  '';
+}
+```
+This is a very simple example of how we can declaratively define an environment that we can enter with `nix-shell`
+
+---
+# by now we learned ...
+
+- (un-)installing software with `nix-env`
+- about `/nix/store`
+- about **channels** and **nixpkgs**
+- about `nix-shell`
+- creating a declarative shell environment
+
+# we still need look at ...
+
+- the nix language
+- using `nix-build`
+- building our own app with nix
+- adding a tool to nixpkgs
+---
+# Nix: Digging Deeper
+### The Nix Language: Strings
+
+```Nix
+"I am a String"
+```
+```Nix
+''Me
+"as well"
+''
+```
+
+```Nix
+"foo" + "bar" # => "foobar"
+```
+
+```Nix
+foo = "hello world"
+"${foo} !" # => "hello world !"
+```
+---
+
+# Nix: Digging Deeper
+### The Nix Language: Numbers
+
+```Nix
+2 + 2 # => 4
+```
+
+```Nix
+2/2 # => !!! /home/foo/2/2 !!!
+```
+
+```Nix
+2 / 2 # => 1
+```
+
+---
+
+# Nix: Digging Deeper
+### The Nix Language: Booleans
+
+```Nix
+1 < 2
+true
+```
+
+```Nix
+1 > 2
+false
+```
+
+```Nix
+true || false # => true
+true && false # => false
+```
+
+---
+
+# Nix: Digging Deeper
+### The Nix Language: Lists
+
+```Nix
+[1 "foo" false]
+```
+
+```Nix
+builtins.head [1 "foo" false] # => 1
+```
+
+```Nix
+builtins.elemAt [1 "foo" false] 0 # => 1
+```
+---
+
+# Nix: Digging Deeper
+### The Nix Language: Sets
+
+```Nix
+{ a = 0; b = 1; c = "2" }
+```
+
+```Nix
+{ a = 0; b = 1; c = "2" }.a # => 0
+```
+
+```Nix
+rec { a = 0; b = 1; c = ''this is "${a}"''}.c # => "this is 0"
+```
+
+* self-reference requires **recursive sets** -> `rec`
+
+---
+
+# Nix: Digging Deeper
+### The Nix Language: Functions
+
+```Nix
+id = x: x
+id 3 # => 3
+```
+
+```Nix
+add = x: y: x + y
+add 1 3 # => 4
+```
+
+```Nix
+hello = { prefix, name }: "Hello ${prefix} ${name} !"
+hello {prefix = "Mr"; name = "Bond"; } # => "Hello Mr Bond"
+```
+---
+# Nix: Digging Deeper
+### The Nix Language: Rest Arguments
+
+```Nix
+f = args@{a, ...}: a + args.b
+f {a=1; b=2;} # => 3
+```
+
+If you don't want to depend on a set of arguments but only expect
+some single args to be there this is a good fit
+
+---
+# Nix: Digging Deeper
+### The Nix Language: Let Bindings
+
+```Nix
+let
+  person = { name = "john"; age = 42; };
+  showPerson = x: "called ${x.person} aged ${x.age}";
+in
+  showPerson person # => "called john aged 42"
+```
+
+Let make a set of bindings (here `person` and `showPerson`) available in the context
+that follows `in`
+
+---
+# Nix: Digging Deeper
+### The Nix Language: With Keyword
+
+```Nix
+buildInputs = with pkgs; [ nano emacs vim ];
+```
+```Nix
+with {a=1; b=2;}; {foo=a;}
+```
+**with** allows you to extract variables from a set and include them into the scope of the with-body.
+
+**NOTE**: This can be very useful but also confusing: It can lead to situation where it is not obvious where some value actually comes from -- **with** is not very explicit.
+
+---
+# Nix: Digging Deeper
+### The Nix Language: Imports
+
+```Nix
+# foo.nix
+
+{
+    hello = x: "hello ${x}"
+}
+```
+```Nix
+# main.nix
+
+hello = (import ./foo.nix).hello
+hello "batman" # => "hello batman"
+```
+
+---
+# Nix: Digging Deeper
+### The Nix Language: Conditionals
+
+```Nix
+silly = x: if x > 42 then "yay" else "silly number"
+
+silly 1  # => "silly number"
+silly 43 # => "yay"
+```
+
+Nix has **if/then/else** clauses like most other languages.
+
+---
+# Nix: Digging Deeper
+### Extending Our Shell Environment (Hands-On!)
+
+![](https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif)
+---
+
+# Nix: Digging Deeper
+### Extending Our Shell Environment: Passing Arguments
+
+You can pass arguments to `nix-shell`: 
+
+```shell
+$ nix-shell --arg foo 42        # => passes arg `foo` with value 42
+
+$ nix-shell --argstr name sally # => passes arg `name` with value "sally"
+```
+
+You basically just tell `nix-shell` which additional function arguments you would like
+to supply.
+
+---
+# Nix: Digging Deeper
+### Extending Our Shell Environment: Testing Your Code
+
+```shell
+$ nix-instantiate --eval shell.nix
+<LAMBDA>
+```
+
+```shell
+$ nix-instantiate --eval --expr '"foobar"'
+"foobar"
+```
+
+```shell
+$ nix repl
+nix-repl> x = 42
+nix-repl> x
+42
+nix-repl>
+```
+
+Use any combination of the above to test/verify Nix code. For `shell.nix` you can of course also just run `nix-shell` and see what happens ;)
+
+---
+# Nix: Digging Deeper
+### Extending Our Shell Environment
+
+```Nix
+{ pkgs ? import <nixpkgs> {} }:
+pkgs.mkShell {
+  buildInputs = [ pkgs.cowsay ];
+  shellHook = ''echo "Welcome in the cowsay shell"'';
+}
+```
+
+💥 **Hands-On**
+- Adjust `shell.nix` to use **either** `cowsay` **or** `hello` to print a welcome message
+- Adjust `shell.nix` to take a `production` argument. In production mode it should print a warning message
+
+---
+# Nix: Digging Deeper
+### Building Our First Package
+
+- We are going to write our first **derivation**
+- **Actually** we've been doing that before but nobody noticed..
+
+---
+# Nix: Digging Deeper
+### Building Our First Package: "Derivation"
+
+![](https://media.giphy.com/media/glmRyiSI3v5E4/giphy.gif)
+---
+# Nix: Digging Deeper
+### Building Our First Package: What Is A Derivation?
+
+**A derivation from the language perspective:**
+
+```Nix
+{ name, system, builder }
+```
+
+A set that needs 3 specific attributes. This is:
+
+1. correct
+2. not very useful right now
+
+---
+# Nix: Digging Deeper
+### Building Our First Package: What Is A Derivation?
+
+**What is a derivation conceptually?:**
+
+- A **derivation** contains information on how to build a package 
+- Nix can **consume** a derivation to create an output
+- Nix first creates `.drv` files and from that the actual output
+
+---
+# Nix: Digging Deeper
+### Building Our First Package: What Is A Derivation?
+
+**A useful analogy:**
+
+- `*.nix` == `*.c`
+- `*.drv` == `*.o`
+- output store path == actual package
+
+---
+# Nix: Digging Deeper
+### Building Our First Package: What Is A Derivation?
+
+1. **Evaluation** Phase: `.nix` -> `.drv`
+2. **Build** Phase: `.drv` -> `outPath`
+
+---
+# Nix: Digging Deeper
+### Building Our First Package: What Is A Derivation?
+
+**Confusing? The Good News Is:**
+
+- We do not really have to care about all those details that much.
+- There are enough useful abstractions that help us
+---
+
+# Nix: Digging Deeper
+### Building Our First Package: Packaging a silly script
+
+```shell
+#!/usr/bin/env bash
+
+echo "hello workshop"
+cowsay "howdy"
+```
+
+**Our task is to turn this silly script into a Nix package**
+
+---
+# Nix: Digging Deeper
+### Building Our First Package: Packaging a silly script
+
+```Nix
+# default.nix
+
+{ pkgs ? import <nixpkgs> {} }:
+
+with pkgs;
+
+stdenv.mkDerivation {
+  name = "silly-hello";
+  version = "1.0";
+  src = ./.;
+
+  buildInputs = [ bash makeWrapper cowsay gnugrep ];
+
+  buildPhase = "";
+
+  installPhase = ''
+    mkdir -p $out/bin
+    cp ./hello $out/bin/silly-hello
+    chmod +x $out/bin/silly-hello
+    wrapProgram $out/bin/silly-hello\
+        --prefix PATH : ${lib.makeBinPath [ cowsay ]}
+  '';
+}
+```
+
+---
+
+# We actually got here? I am surprised
+
+### What Other Nix related things should we look into?
+
+---
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
